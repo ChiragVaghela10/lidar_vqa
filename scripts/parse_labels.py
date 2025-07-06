@@ -1,3 +1,4 @@
+# Generate generated_qa.json for structured QA pairs
 import os
 import json
 import random
