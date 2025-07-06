@@ -25,7 +25,7 @@ _, val_idx = train_test_split(list(range(len(dataset))), test_size=0.2, random_s
 val_subset = Subset(dataset, val_idx)
 
 # --- Inference + Visualization ---
-os.makedirs("outputs/eval", exist_ok=True)
+os.makedirs("../outputs/eval", exist_ok=True)
 
 img_list = [6, 13, 15]
 for i in img_list:  # First 20 samples
@@ -65,4 +65,4 @@ for i in img_list:  # First 20 samples
     print(f"Q: {question}")
     print(f"Predicted: {pred_label} ({confidence*100:.1f}%) | Ground Truth: {true_label}")
     print("-" * 50)
-    original.save(f"outputs/eval/sample_{i:02d}.png")
+    original.save(f"../outputs/eval/sample_{i:02d}.png")
