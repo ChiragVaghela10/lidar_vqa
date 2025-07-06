@@ -1,0 +1,36 @@
+{
+  "os":  "macOS-15.5-arm64-arm-64bit-Mach-O",
+  "python":  "CPython 3.13.0",
+  "startedAt":  "2025-07-06T16:37:38.198938Z",
+  "program":  "/Users/chiragvaghela/PycharmProjects/lidar_vqa/train/clip_finetune.py",
+  "codePath":  "train/clip_finetune.py",
+  "codePathLocal":  "clip_finetune.py",
+  "git":  {
+    "remote":  "https://github.com/ChiragVaghela10/lidar_vqa.git",
+    "commit":  "bfeaab94d6e40b0bf10b0fb768940438761584dd"
+  },
+  "email":  "chiragvaghela10@ymail.com",
+  "root":  "/Users/chiragvaghela/PycharmProjects/lidar_vqa/train",
+  "host":  "Chirags-MacBook-Pro.local",
+  "executable":  "/Users/chiragvaghela/PycharmProjects/lidar_vqa/.venv/bin/python",
+  "cpu_count":  12,
+  "cpu_count_logical":  12,
+  "disk":  {
+    "/":  {
+      "total":  "494384795648",
+      "used":  "170293809152"
+    }
+  },
+  "memory":  {
+    "total":  "25769803776"
+  },
+  "apple":  {
+    "name":  "Apple M4 Pro",
+    "ecpuCores":  4,
+    "pcpuCores":  8,
+    "gpuCores":  16,
+    "memoryGb":  24,
+    "ramTotalBytes":  "25769803776"
+  },
+  "writerId":  "uddn7qgg63gfdwak3hr79s29f4jkaa20"
+}
