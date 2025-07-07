@@ -2,12 +2,16 @@ import torch
 import clip
 import os
 import wandb
-
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.metrics import confusion_matrix, classification_report
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import train_test_split
 
 from models.fusion_head import CLIPFusionHead
+from models.cross_attention_fusion import CrossAttentionFusionHead
 from train.dataset_qa import KittiQADataset
 
 #if torch.backends.mps.is_available():
@@ -37,6 +41,23 @@ wandb.init(
         "epochs": num_epochs
     }
 )
+
+
+def log_attention_heatmap(attn_weights, name, step):
+    """
+    attn_weights: [B, num_heads, Q, K] or [B, Q, K]
+    name: wandb key name
+    step: training step
+    """
+    if attn_weights.dim() == 4:
+        attn_weights = attn_weights.mean(1)  # avg over heads
+
+    fig, ax = plt.subplots()
+    ax.imshow(attn_weights[0].cpu().detach().numpy(), cmap='viridis')
+    ax.set_title(name)
+    wandb.log({name: wandb.Image(fig)})
+    plt.close(fig)
+
 
 clip_model, preprocess = clip.load("ViT-B/32", device=device)
 # Freeze all parameters
@@ -70,7 +91,8 @@ train_idx, val_idx = train_test_split(indices, test_size=0.3, random_state=42)
 train_loader = DataLoader(Subset(dataset, train_idx), batch_size=32, shuffle=True, pin_memory=False)
 val_loader = DataLoader(Subset(dataset, val_idx), batch_size=32, shuffle=False, pin_memory=False)
 
-head = CLIPFusionHead(num_classes=len(candidates)).to(device)
+# head = CLIPFusionHead(num_classes=len(candidates)).to(device)
+head = CrossAttentionFusionHead(num_classes=len(candidates)).to(device)
 criterion = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.AdamW(
     #filter(lambda p: p.requires_grad, list(clip_model.parameters()) + list(head.parameters())),
@@ -81,6 +103,8 @@ optimizer = torch.optim.AdamW(
 
 # --- Training ---
 global_step = 0
+all_preds = []
+all_labels = []
 
 for epoch in range(num_epochs):
     head.train()
@@ -96,7 +120,7 @@ for epoch in range(num_epochs):
             image_feats = clip_model.encode_image(images)
             text_feats = clip_model.encode_text(questions)
 
-        logits = head(image_feats, text_feats)
+        logits, txt_weights, img_weights = head(image_feats, text_feats)
         loss = criterion(logits, labels)
 
         optimizer.zero_grad()
@@ -116,9 +140,14 @@ for epoch in range(num_epochs):
         # Log Train Summary
         wandb.log({
             "train/loss": loss.item(),
-            "train/acc": acc,
-            "step": global_step
+            "train/acc": acc
         })
+        if global_step % 100 == 0:
+            os.makedirs("attention_weights", exist_ok=True)
+            torch.save(txt_weights.cpu(), f"attention_weights/t2i_step{global_step}.pt")
+            torch.save(img_weights.cpu(), f"attention_weights/i2t_step{global_step}.pt")
+            log_attention_heatmap(txt_weights, "attn_text_to_image", global_step)
+            log_attention_heatmap(img_weights, "attn_image_to_text", global_step)
         global_step += 1
 
     # --- Validation ---
@@ -135,23 +164,40 @@ for epoch in range(num_epochs):
             image_feats = clip_model.encode_image(images).float()
             text_feats = clip_model.encode_text(questions).float()
 
-            logits = head(image_feats, text_feats)
+            logits, txt_weights, img_weights = head(image_feats, text_feats)
             loss = criterion(logits, labels)
 
             preds = logits.argmax(dim=1)
             correct_val += (preds == labels).sum().item()
             total_val += labels.size(0)
             val_loss += loss.item()
+            all_preds.extend(preds.cpu().tolist())
+            all_labels.extend(labels.cpu().tolist())
 
-            # Log Val Summary
-            wandb.log({
-                "epoch/val_loss": val_loss / len(val_loader),
-                "epoch/val_acc": correct_val / total_val,
-                "epoch": epoch + 1
-            })
+    class_names = candidates  # same as you used in KittiQADataset
+    cm = confusion_matrix(all_labels, all_preds, labels=range(len(class_names)))
+    # Log Val Summary
+    wandb.log({
+        "epoch/val_loss": val_loss / len(val_loader),
+        "epoch/val_acc": correct_val / total_val
+    })
+
+    wandb.log({
+        "val/confusion_matrix": wandb.plot.confusion_matrix(
+            probs=None,
+            y_true=all_labels,
+            preds=all_preds,
+            class_names=class_names
+        )
+    })
 
     print(f"Epoch {epoch+1} [Train]: Acc={correct/total:.4f}, Loss={running_loss/len(train_loader):.4f}")
     print(f"Epoch {epoch+1} [Val]: Acc={correct_val / total_val:.4f}, Loss={val_loss / len(val_loader):.4f}")
+
+# 📊 Classification Report
+report = classification_report(all_labels, all_preds, output_dict=True, zero_division=0)
+df_report = pd.DataFrame(report).transpose()
+wandb.log({f"val/classification_report": wandb.Table(dataframe=df_report)})
 
 # --- Save Model ---
 os.makedirs("checkpoints", exist_ok=True)
