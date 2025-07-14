@@ -2,7 +2,7 @@ import os
 import torch
 import clip
 from PIL import Image, ImageDraw, ImageFont
-from models.fusion_head import CLIPFusionHead
+from models.clip_fusion import CLIPFusionHead
 from train.dataset_qa import KittiQADataset
 from torch.utils.data import Subset
 from sklearn.model_selection import train_test_split

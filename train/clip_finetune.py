@@ -10,7 +10,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import train_test_split
 
-from models.fusion_head import CLIPFusionHead
+from models.clip_fusion import CLIPFusionHead
 from models.cross_attention_fusion import CrossAttentionFusionHead
 from train.dataset_qa import KittiQADataset
 
@@ -194,7 +194,7 @@ for epoch in range(num_epochs):
     print(f"Epoch {epoch+1} [Train]: Acc={correct/total:.4f}, Loss={running_loss/len(train_loader):.4f}")
     print(f"Epoch {epoch+1} [Val]: Acc={correct_val / total_val:.4f}, Loss={val_loss / len(val_loader):.4f}")
 
-# 📊 Classification Report
+# Classification Report
 report = classification_report(all_labels, all_preds, output_dict=True, zero_division=0)
 df_report = pd.DataFrame(report).transpose()
 wandb.log({f"val/classification_report": wandb.Table(dataframe=df_report)})
