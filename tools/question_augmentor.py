@@ -12,7 +12,7 @@ def paraphrase_question(question, n=3):
 
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
-        messages=[{
+        messages= [{
             "role": "user",
             "content": prompt
         }],

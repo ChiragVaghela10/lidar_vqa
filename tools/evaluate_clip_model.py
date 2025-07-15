@@ -14,7 +14,7 @@ clip_model, preprocess = clip.load("ViT-B/32", device=device)
 
 # --- Load model head ---
 head = CLIPFusionHead(num_classes=5)
-head.load_state_dict(torch.load("../train/checkpoints/clip_head.pth", map_location=device))
+head.load_state_dict(torch.load("../outputs/checkpoints/clip_head.pth", map_location=device))
 head.eval().to(device).float()
 
 # --- Load dataset and split ---
