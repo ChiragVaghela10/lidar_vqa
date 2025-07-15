@@ -13,5 +13,5 @@ def log_attention_heatmap(attn_weights, name, step):
     fig, ax = plt.subplots()
     ax.imshow(attn_weights[0].cpu().detach().numpy(), cmap='viridis')
     ax.set_title(name)
-    wandb.log({name: wandb.Image(fig)}, step=step)
+    wandb.log({name: wandb.Image(fig)})
     plt.close(fig)

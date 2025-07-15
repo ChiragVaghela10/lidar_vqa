@@ -210,7 +210,7 @@ __marimo__/
 outputs/checkpoints/
 outputs/attention_weights/
 outputs/logs/
-outputs/logs/wandb/latest-run
+outputs/logs/wandb/latest-run/
 
 # Data
 data/testing
