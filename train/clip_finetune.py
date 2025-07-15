@@ -3,8 +3,6 @@ import clip
 import os
 import wandb
 from pathlib import Path
-import pandas as pd
-from sklearn.metrics import confusion_matrix, classification_report
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import train_test_split
@@ -12,7 +10,7 @@ from sklearn.model_selection import train_test_split
 from models.cross_attention_fusion import CrossAttentionFusionHead
 from train.dataset_qa import KittiQADataset
 from config.constants import num_epochs, learning_rate, wandb_config
-from utils.visualizations import log_attention_heatmap
+from utils.visualizations import log_attention_heatmap, log_confusion_matrix, log_classification_report
 
 
 if torch.backends.mps.is_available():
@@ -66,122 +64,122 @@ val_loader = DataLoader(Subset(dataset, val_idx), batch_size=32, shuffle=False, 
 
 
 # --- Fusion Head ---
-# head = CLIPFusionHead(num_classes=len(candidates)).to(device, dtype=torch.float32)
-head = CrossAttentionFusionHead(num_classes=len(candidates)).to(device, dtype=torch.float32)
+# clip_head = CLIPFusionHead(num_classes=len(candidates)).to(device, dtype=torch.float32)
+attention_head = CrossAttentionFusionHead(num_classes=len(candidates)).to(device, dtype=torch.float32)
 criterion = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.AdamW(
     #filter(lambda p: p.requires_grad, list(clip_model.parameters()) + list(head.parameters())),
-    head.parameters(),
+    params=attention_head.parameters(),
     lr=learning_rate
 )
 
 
-global_step = 0
-all_preds = []
-all_labels = []
-
-for epoch in range(num_epochs):
-    # TODO: Refactor the code using
-    #  loss, preds, labels, txt_weights, img_weights = run_batch(batch, clip_model, head, criterion, device)
-    # --- Training ---
-    head.train()
-    total, correct, training_loss = 0, 0, 0
-    loop = tqdm(train_loader, desc=f"Epoch {epoch + 1} [Train]")
-
-    for batch in loop:
-        images = batch["image"].to(device, dtype=torch.float32)
-        questions = clip.tokenize(batch["question"]).to(device, dtype=torch.long)
-        labels = batch["label"].to(device, dtype=torch.long)
-
-        with torch.no_grad():
-            image_feats = clip_model.encode_image(images)
-            text_feats = clip_model.encode_text(questions)
-
-        logits, txt_weights, img_weights = head(image_feats, text_feats)
-        loss = criterion(logits, labels)
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        preds = logits.argmax(dim=1)
-        correct += (preds == labels).sum().item()
-        total += labels.size(0)
-        training_loss += loss.item()
-
-        acc = correct / total
-        avg_loss = training_loss / total
-
-        loop.set_postfix({"Acc": f"{acc:.4f}", "Loss": f"{avg_loss:.4f}"})
-
-        # --- Log Train Summary ---
-        wandb.log({
-            "train/loss": loss.item(),
-            "train/acc": acc
-        })
-        if global_step % 100 == 0:
-            os.makedirs(attention_weights_path, exist_ok=True)
-            torch.save(txt_weights.cpu(), attention_weights_path / Path(f"t2i_step{global_step}.pt"))
-            torch.save(img_weights.cpu(), attention_weights_path / Path(f"i2t_step{global_step}.pt"))
-            log_attention_heatmap(txt_weights, "attn_text_to_image", global_step)
-            log_attention_heatmap(img_weights, "attn_image_to_text", global_step)
-        global_step += 1
-
-    # --- Validation ---
-    head.eval()
-    total_val, correct_val, val_loss = 0, 0, 0
-    loop = tqdm(val_loader, desc=f"Epoch {epoch + 1} [Val]")
+def run_batch(batch, clip_model, head, criterion, device):
+    images = batch["image"].to(device, dtype=torch.float32)
+    questions = clip.tokenize(batch["question"]).to(device, dtype=torch.long)
+    labels = batch["label"].to(device, dtype=torch.long)
 
     with torch.no_grad():
+        image_feats = clip_model.encode_image(images).float()
+        text_feats = clip_model.encode_text(questions).float()
+
+    logits, txt_weights, img_weights = head(image_feats, text_feats)
+    loss = criterion(logits, labels)
+    preds = logits.argmax(dim=1)
+
+    return loss, preds, labels, txt_weights, img_weights
+
+
+def train_clip_vqa(
+    model=clip_model,
+    head=attention_head,
+    train_loader=train_loader,
+    val_loader=val_loader,
+    optimizer=optimizer,
+    criterion=criterion,
+    device=device,
+    candidates=candidates,
+    # attention_weights_path=attention_weights_path,
+    # log_attention_heatmap=log_attention_heatmap,
+    epochs=num_epochs
+):
+    # train_step, val_step = 0, 0
+
+    for epoch in range(epochs):
+        head.train()
+        total_train, correct_train, train_loss = 0, 0, 0
+        loop = tqdm(train_loader, desc=f"Epoch {epoch + 1} [Train]")
+
         for batch in loop:
-            images = batch["image"].to(device, dtype=torch.float32)
-            questions = clip.tokenize(batch["question"]).to(device, dtype=torch.long)
-            labels = batch["label"].to(device, dtype=torch.long)
+            loss, preds, labels, txt_weights, img_weights = run_batch(batch, clip_model, head, criterion, device)
 
-            image_feats = clip_model.encode_image(images).float()
-            text_feats = clip_model.encode_text(questions).float()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-            logits, txt_weights, img_weights = head(image_feats, text_feats)
-            loss = criterion(logits, labels)
+            correct_train += (preds == labels).sum().item()
+            total_train += labels.size(0)
+            train_loss += loss.item()
 
-            preds = logits.argmax(dim=1)
-            correct_val += (preds == labels).sum().item()
-            total_val += labels.size(0)
-            val_loss += loss.item()
-            all_preds.extend(preds.cpu().tolist())
-            all_labels.extend(labels.cpu().tolist())
+            acc_train = correct_train / total_train
+            avg_train_loss = train_loss / total_train
+            loop.set_postfix({"Train Acc": f"{acc_train:.4f}", "Train Loss": f"{avg_train_loss:.4f}"})
 
-    class_names = candidates  # same as we used in KittiQADataset
-    cm = confusion_matrix(all_labels, all_preds, labels=range(len(class_names)))
-    # --- Log Val Summary ---
-    wandb.log({
-        "epoch/val_loss": val_loss / len(val_loader),
-        "epoch/val_acc": correct_val / total_val
-    })
+            wandb.log({
+                "train/loss": loss.item(),
+                "train/acc": acc_train
+            })
 
-    wandb.log({
-        "val/confusion_matrix": wandb.plot.confusion_matrix(
-            probs=None,
-            y_true=all_labels,
-            preds=all_preds,
-            class_names=class_names
-        )
-    })
+            # if train_step % 300 == 0:
+            #     os.makedirs(attention_weights_path, exist_ok=True)
+            #     torch.save(txt_weights.cpu(), attention_weights_path / Path(f"t2i_step{train_step}.pt"))
+            #     torch.save(img_weights.cpu(), attention_weights_path / Path(f"i2t_step{train_step}.pt"))
+            #     log_attention_heatmap(txt_weights, "attn_text_to_image", train_step)
+            #     log_attention_heatmap(img_weights, "attn_image_to_text", train_step)
 
-    print(f"Epoch {epoch+1} [Train]: Acc={correct/total:.4f}, Loss={training_loss / len(train_loader):.4f}")
-    print(f"Epoch {epoch+1} [Val]: Acc={correct_val / total_val:.4f}, Loss={val_loss / len(val_loader):.4f}")
+            # train_step += 1
 
+        # --- Validation ---
+        head.eval()
+        total_val, correct_val, val_loss = 0, 0, 0
+        all_preds, all_labels = [], []
+        loop = tqdm(val_loader, desc=f"Epoch {epoch + 1} [Val]")
 
-# --- Classification Report ---
-report = classification_report(all_labels, all_preds, output_dict=True, zero_division=0)
-df_report = pd.DataFrame(report).transpose()
-wandb.log({f"val/classification_report": wandb.Table(dataframe=df_report)})
+        with torch.no_grad():
+            for batch in loop:
+                loss, preds, labels, txt_weights, img_weights = run_batch(batch, clip_model, head, criterion, device)
 
+                correct_val += (preds == labels).sum().item()
+                total_val += labels.size(0)
+                val_loss += loss.item()
+                all_preds.extend(preds.cpu().tolist())
+                all_labels.extend(labels.cpu().tolist())
 
-# --- Save Model ---
-os.makedirs(checkpoints_path, exist_ok=True)
-torch.save(head.state_dict(), checkpoints_path / Path("clip_head.pth"))
+                acc_val = correct_val / total_val
+                avg_val_loss = val_loss / total_val
+                loop.set_postfix({"Val Acc": f"{acc_val:.4f}", "Val Loss": f"{avg_val_loss:.4f}"})
 
+                wandb.log({
+                    "val/loss": loss.item(),
+                    "val/acc": acc_val
+                })
 
-# --- W&B Stopped ---
-wandb.finish()
+                # val_step += 1
+
+        wandb.log({
+            "epoch/val_loss": val_loss / len(val_loader),
+            "epoch/val_acc": correct_val / total_val,
+        })
+
+        log_confusion_matrix(all_labels, all_preds, candidates)#, val_step)
+        log_classification_report(all_labels, all_preds)#, val_step)
+
+        print(f"Epoch {epoch+1} [Train]: Acc={correct_train/total_train:.4f}, Loss={train_loss / len(train_loader):.4f}")
+        print(f"Epoch {epoch+1} [Val]: Acc={correct_val / total_val:.4f}, Loss={val_loss / len(val_loader):.4f}")
+
+    # --- Save Model ---
+    os.makedirs(checkpoints_path, exist_ok=True)
+    torch.save(head.state_dict(), checkpoints_path / Path("clip_head.pth"))
+
+    # --- W&B Stopped ---
+    wandb.finish()
