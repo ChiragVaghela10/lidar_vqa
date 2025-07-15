@@ -81,6 +81,8 @@ all_preds = []
 all_labels = []
 
 for epoch in range(num_epochs):
+    # TODO: Refactor the code using
+    #  loss, preds, labels, txt_weights, img_weights = run_batch(batch, clip_model, head, criterion, device)
     # --- Training ---
     head.train()
     total, correct, training_loss = 0, 0, 0
